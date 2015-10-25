@@ -1,3 +1,8 @@
+Bird's Eye View
+===============
+
+Project dashboard
+
 License
 -------
 
