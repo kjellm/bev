@@ -1,3 +1,4 @@
+# coding: utf-8
 require "net/http"
 require "json"
 
@@ -123,6 +124,15 @@ end
 def print_metric(text, metric)
   puts "#{text}:".ljust(30) << ansi_bg(metric) << $data[metric].to_s.rjust(4) << " " << ansi_clear
 end
+
+puts <<EOT
+┌──────────────────────────────────────────┐
+│             Bird's Eye View              │▒
+└──────────────────────────────────────────┘▒
+  ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒
+
+EOT
+
 
 print_metric "Stories in progress", :in_progress
 print_metric "Pull requests",       :pull_requests
