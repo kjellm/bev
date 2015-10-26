@@ -18,7 +18,7 @@ require "json"
 # Other Operations Metrics?
 
 Struct.new "Data", :in_progress, :pull_requests, :dynos_down, :failing_pipelines
-$data = Struct::Data.new(*Array.new(4, 0))
+$data = nil
 $warn_treshold = Struct::Data.new 2, 1, 1, 1
 $crit_treshold = Struct::Data.new 3, 3, 1, 1
 
@@ -44,26 +44,6 @@ def get(uri)
     end
   end
 end
-
-repos_url = get URI("https://api.github.com/orgs/gramo-org") do |resp|
-  resp["repos_url"]
-end
-
-github_repos = get URI(repos_url)
-
-github_repos.each do |repo|
-  url = repo['issues_url'].sub(/\{\/number\}/, '')
-  get URI(url) do |resp|
-    $data.in_progress += resp.count { |i| i["labels"].find {|l| l["name"] == "in progress" }}
-  end
-
-  url = repo['pulls_url'].sub(/\{\/number\}/, '')
-  get URI(url) do |resp|
-    $data.pull_requests += resp.count
-  end
-end
-
-# HEROKU
 
 def heroku_get(uri)
   http = Net::HTTP.new uri.host, uri.port
@@ -94,21 +74,6 @@ def heroku_get(uri)
   end
 end
 
-
-apps = heroku_get URI("https://api.heroku.com/apps") do |resp|
-  resp.find_all { |app| app["name"].start_with? "gramo" }
-end
-
-apps.each do |app|
-  uri = URI("https://api.heroku.com/apps/#{app["name"]}/dynos")
-  heroku_get uri  do |resp|
-    $data.dynos_down += resp.count { |d| not %w(idle up).include? d["state"] }
-  end
-end
-
-
-# SNAP CI
-
 def snapci_get(uri)
   Net::HTTP.start(uri.host, uri.port, use_ssl: true) do |http|
     req = Net::HTTP::Get.new uri
@@ -125,22 +90,6 @@ def snapci_get(uri)
     end
   end
 end
-
-github_repos.each do |repo|
-  latest_url = begin
-                 snapci_get URI("https://api.snap-ci.com/project/#{repo['full_name']}/branch/master/pipelines/latest") do |resp|
-                   resp["_links"]["redirect"]["href"]
-                 end
-               rescue
-                 next
-               end
-
-  snapci_get URI(latest_url) do |resp|
-    $data.failing_pipelines += 1 if resp['result'] != 'passed'
-  end
-end
-
-
 
 def ansi_bg(metric)
   case
@@ -161,16 +110,81 @@ def print_metric(text, metric)
   puts "#{text}:".ljust(30) << ansi_bg(metric) << $data[metric].to_s.rjust(4) << " " << ansi_clear
 end
 
-puts <<EOT
+def print_banner
+  puts <<EOT
 ┌──────────────────────────────────────────┐
 │             Bird's Eye View              │▒
 └──────────────────────────────────────────┘▒
-  ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒
+  ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒
 
 EOT
+end
+
+def main
+  $data = Struct::Data.new(*Array.new(4, 0))
+
+  # GITHUB
+
+  repos_url = get URI("https://api.github.com/orgs/gramo-org") do |resp|
+    resp["repos_url"]
+  end
+
+  github_repos = get URI(repos_url)
+
+  github_repos.each do |repo|
+    url = repo['issues_url'].sub(/\{\/number\}/, '')
+    get URI(url) do |resp|
+      $data.in_progress += resp.count { |i| i["labels"].find {|l| l["name"] == "in progress" }}
+    end
+
+    url = repo['pulls_url'].sub(/\{\/number\}/, '')
+    get URI(url) do |resp|
+      $data.pull_requests += resp.count
+    end
+  end
+
+# HEROKU
+
+  apps = heroku_get URI("https://api.heroku.com/apps") do |resp|
+    resp.find_all { |app| app["name"].start_with? "gramo" }
+  end
+
+  apps.each do |app|
+    uri = URI("https://api.heroku.com/apps/#{app["name"]}/dynos")
+    heroku_get uri  do |resp|
+      $data.dynos_down += resp.count { |d| not %w(idle up).include? d["state"] }
+    end
+  end
 
 
-print_metric "Stories in progress", :in_progress
-print_metric "Pull requests",       :pull_requests
-print_metric "Dynos down",          :dynos_down
-print_metric "Failed pipelines",    :failing_pipelines
+# SNAP CI
+
+  github_repos.each do |repo|
+    latest_url = begin
+                   snapci_get URI("https://api.snap-ci.com/project/#{repo['full_name']}/branch/master/pipelines/latest") do |resp|
+                     resp["_links"]["redirect"]["href"]
+                   end
+                 rescue
+                   next
+                 end
+
+    snapci_get URI(latest_url) do |resp|
+      $data.failing_pipelines += 1 if resp['result'] != 'passed'
+    end
+  end
+
+  system("clear")
+  print_banner
+  print_metric "Stories in progress", :in_progress
+  print_metric "Pull requests",       :pull_requests
+  print_metric "Dynos down",          :dynos_down
+  print_metric "Failed pipelines",    :failing_pipelines
+
+end
+
+system("clear")
+print_banner
+while true do
+  main
+  sleep 60
+end
