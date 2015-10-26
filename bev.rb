@@ -17,13 +17,14 @@ require "json"
 #
 # Other Operations Metrics?
 
-Struct.new "Data", :in_progress, :pull_requests, :dynos_down
-$data = Struct::Data.new(*Array.new(3, 0))
-$warn_treshold = Struct::Data.new 2, 1, 1
-$crit_treshold = Struct::Data.new 3, 3, 1
+Struct.new "Data", :in_progress, :pull_requests, :dynos_down, :failing_pipelines
+$data = Struct::Data.new(*Array.new(4, 0))
+$warn_treshold = Struct::Data.new 2, 1, 1, 1
+$crit_treshold = Struct::Data.new 3, 3, 1, 1
 
 $heroku_token = ENV.fetch('HEROKU_TOKEN')
 $github_token = ENV.fetch('GITHUB_TOKEN')
+$snapci_token = ENV.fetch('SNAPCI_TOKEN')
 
 # GITHUB
 
@@ -48,9 +49,9 @@ repos_url = get URI("https://api.github.com/orgs/gramo-org") do |resp|
   resp["repos_url"]
 end
 
-repos = get URI(repos_url)
+github_repos = get URI(repos_url)
 
-repos.each do |repo|
+github_repos.each do |repo|
   url = repo['issues_url'].sub(/\{\/number\}/, '')
   get URI(url) do |resp|
     $data.in_progress += resp.count { |i| i["labels"].find {|l| l["name"] == "in progress" }}
@@ -106,6 +107,41 @@ apps.each do |app|
 end
 
 
+# SNAP CI
+
+def snapci_get(uri)
+  Net::HTTP.start(uri.host, uri.port, use_ssl: true) do |http|
+    req = Net::HTTP::Get.new uri
+    req["Accept"] = "application/vnd.snap-ci.com.v1+json"
+    req.basic_auth "kjellm", $snapci_token
+
+    response = http.request req
+    raise response.error! unless response.code == "200" || response.code == "302"
+    body = JSON.parse response.body
+    if block_given?
+      yield body
+    else
+      body
+    end
+  end
+end
+
+github_repos.each do |repo|
+  latest_url = begin
+                 snapci_get URI("https://api.snap-ci.com/project/#{repo['full_name']}/branch/master/pipelines/latest") do |resp|
+                   resp["_links"]["redirect"]["href"]
+                 end
+               rescue
+                 next
+               end
+
+  snapci_get URI(latest_url) do |resp|
+    $data.failing_pipelines += 1 if resp['result'] != 'passed'
+  end
+end
+
+
+
 def ansi_bg(metric)
   case
   when $data[metric] >= $crit_treshold[metric]
@@ -137,3 +173,4 @@ EOT
 print_metric "Stories in progress", :in_progress
 print_metric "Pull requests",       :pull_requests
 print_metric "Dynos down",          :dynos_down
+print_metric "Failed pipelines",    :failing_pipelines
