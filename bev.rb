@@ -9,31 +9,31 @@ require "json"
 #
 # Snap CI
 #
-# - Test status
-# - # commits since releas
+# - # commits since release
 # - pending QA, Done tasks
 #
 # Code climate
 #
 # Other Operations Metrics?
 
-Struct.new "Data", :in_progress, :pull_requests, :dynos_down, :failing_pipelines
+$metrics = :in_progress, :pull_requests, :dynos_down, :failing_pipelines, :todos
+Struct.new "Data", *$metrics
 $data = nil
-$warn_treshold = Struct::Data.new 2, 1, 1, 1
-$crit_treshold = Struct::Data.new 3, 3, 1, 1
+$warn_treshold = Struct::Data.new 2, 1, 1, 1, 1
+$crit_treshold = Struct::Data.new 3, 3, 1, 1, 5
 
 $heroku_token = ENV.fetch('HEROKU_TOKEN')
 $github_token = ENV.fetch('GITHUB_TOKEN')
 $snapci_token = ENV.fetch('SNAPCI_TOKEN')
 
-# GITHUB
+def reset_data
+  $data = Struct::Data.new(*Array.new($metrics.length, 0))
+end
 
-def get(uri)
+def get(uri, req_proc)
   Net::HTTP.start(uri.host, uri.port, use_ssl: true) do |http|
     req = Net::HTTP::Get.new uri
-    req["Accept"] = "application/vnd.github.v3+json"
-    req['Authorization'] = "token #$github_token"
-
+    req_proc.(req)
     response = http.request req
     raise response.error! unless response.code == "200"
     body = JSON.parse response.body
@@ -43,6 +43,13 @@ def get(uri)
       body
     end
   end
+end
+
+def github_get(uri, &block)
+  get(uri, ->(req) {
+        req["Accept"] = "application/vnd.github.v3+json"
+        req['Authorization'] = "token #$github_token"
+      }, &block)
 end
 
 def heroku_get(uri)
@@ -81,7 +88,9 @@ def snapci_get(uri)
     req.basic_auth "kjellm", $snapci_token
 
     response = http.request req
-    raise response.error! unless response.code == "200" || response.code == "302"
+    if response.code == "302"
+    end
+    raise response.error! unless response.code == "200"
     body = JSON.parse response.body
     if block_given?
       yield body
@@ -110,6 +119,26 @@ def print_metric(text, metric)
   puts "#{text}:".ljust(30) << ansi_bg(metric) << $data[metric].to_s.rjust(4) << " " << ansi_clear
 end
 
+def write_summary_to_file
+  summary = { ok: 0, warn: 0, crit: 0 }
+  open '/tmp/bev', 'w' do |io|
+    $metrics.each do |metric|
+      key = case
+            when $data[metric] >= $crit_treshold[metric]
+              :crit
+            when $data[metric] >= $warn_treshold[metric]
+              :warn
+            else
+              :ok
+            end
+      summary[key] += 1
+    end
+    io.puts "ok #{summary[:ok]}"
+    io.puts "warn #{summary[:warn]}"
+    io.puts "crit #{summary[:crit]}"
+  end
+end
+
 def print_banner
   puts <<EOT
 ┌──────────────────────────────────────────┐
@@ -121,24 +150,27 @@ EOT
 end
 
 def main
-  $data = Struct::Data.new(*Array.new(4, 0))
+  reset_data
 
   # GITHUB
 
-  repos_url = get URI("https://api.github.com/orgs/gramo-org") do |resp|
+  repos_url = github_get URI("https://api.github.com/orgs/gramo-org") do |resp|
     resp["repos_url"]
   end
 
-  github_repos = get URI(repos_url)
+  github_repos = github_get URI(repos_url)
 
   github_repos.each do |repo|
     url = repo['issues_url'].sub(/\{\/number\}/, '')
-    get URI(url) do |resp|
-      $data.in_progress += resp.count { |i| i["labels"].find {|l| l["name"] == "in progress" }}
+    github_get URI(url) do |resp|
+      $data.in_progress += resp.count do |r|
+        r["labels"].find {|l| l["name"] == "in progress" } \
+        && r["labels"].find {|l| l["name"] == "feature" }
+      end
     end
 
     url = repo['pulls_url'].sub(/\{\/number\}/, '')
-    get URI(url) do |resp|
+    github_get URI(url) do |resp|
       $data.pull_requests += resp.count
     end
   end
@@ -173,6 +205,9 @@ def main
     end
   end
 
+  #$data.todos = `ack -hc --ignore-dir=.bundle --ignore-dir=bower_components --ignore-dir=dist --ignore-dir=tmp "FIX|TODO"`
+
+  write_summary_to_file
   system("clear")
   print_banner
   print_metric "Stories in progress", :in_progress
@@ -184,6 +219,7 @@ end
 
 system("clear")
 print_banner
+write_summary_to_file # Useful for processes that expect the file to exists
 while true do
   main
   sleep 60
