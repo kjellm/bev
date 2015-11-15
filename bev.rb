@@ -218,8 +218,9 @@ def main
 end
 
 system("clear")
-print_banner
+reset_data
 write_summary_to_file # Useful for processes that expect the file to exists
+print_banner
 while true do
   main
   sleep 60
