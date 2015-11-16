@@ -214,8 +214,8 @@ end
 
 def main
   reset_data
-  write_summary_to_file
   gather_data
+  write_summary_to_file
   system("clear")
   print_banner
   print_metrics
