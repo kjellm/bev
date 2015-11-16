@@ -127,10 +127,10 @@ end
 
 def print_banner
   puts <<EOT
-┌──────────────────────────────────────────┐
-│             Bird's Eye View              │▒
-└──────────────────────────────────────────┘▒
-  ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒
+┌────────────────────────────────────┐
+│          Bird's Eye View           │▒
+└────────────────────────────────────┘▒
+  ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒
 
 EOT
 end
@@ -205,7 +205,8 @@ def gather_data
   threads << Thread.new do
     ignore = %w(.bundle bower_components dist tmp)
     ignore = [''].concat(ignore).join(" --ignore-dir=")
-    $data.todos = `ack -hc #{ignore} "FIX|TODO"`.to_i
+    pattern = "FIX|TODO"
+    $data.todos = `ack --no-filename --count #{ignore} "#{pattern}"`.to_i
   end
 
   threads.each { |thread| thread.join }
