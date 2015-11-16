@@ -215,12 +215,14 @@ end
 def main
   reset_data
   write_summary_to_file
+  gather_data
   system("clear")
   print_banner
-  gather_data
   print_metrics
 end
 
+system("clear")
+print_banner
 while true do
   main
   sleep 60
